@@ -1,0 +1,65 @@
+
+// scheduler.proto: gRPC contract (messages + service) Scheduler ke liye.
+// Yahi se `protoc` command chalake Go code generate hota hai
+// (scheduler.pb.go aur scheduler_grpc.pb.go) - unhe seedha edit mat karna,
+// is file ko badlo aur generate command dubara chalao.
+syntax = "proto3";
+package scheduler.v1;
+
+option go_package = "jobflow/proto/scheduler/v1;schedulerv1";
+
+
+
+message TaskSpec {
+  string name = 1;
+  string type = 2;
+  bytes payload = 3;
+  repeated string depends_on = 4;
+}
+
+message SubmitWorkflowRequest {
+  string name = 1;
+  string cron_expr = 2;
+  repeated TaskSpec tasks = 3;
+}
+
+message SubmitWorkflowResponse {
+  string workflow_id = 1;
+}
+
+message PollTaskRequest {
+  string worker_id = 1;
+  repeated string task_types = 2;
+}
+
+message Task {
+  string id = 1;
+  string type = 2;
+  bytes payload = 3;
+  int32 attempt = 4;
+  string idempotency_key = 5;
+  int64 lease_ttl_seconds = 6;
+}
+
+message PollTaskResponse {
+  bool has_task = 1;
+  Task task = 2;
+}
+
+message ReportResultRequest {
+  string worker_id = 1;
+  string task_id = 2;
+  int32 attempt = 3;
+  bool success = 4;
+  string error = 5;
+}
+
+message ReportResultResponse {
+  bool accepted = 1;
+}
+
+service SchedulerService {
+  rpc SubmitWorkflow(SubmitWorkflowRequest) returns (SubmitWorkflowResponse);
+  rpc PollTask(PollTaskRequest) returns (PollTaskResponse);
+  rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+}

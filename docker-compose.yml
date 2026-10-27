@@ -1,0 +1,18 @@
+# docker-compose.yml: Local Postgres 16 container chalane ke liye.
+# `docker compose up -d` se start hoga, localhost:5432 pe available hoga
+# (user/pass/db = jobflow/jobflow/jobflow). Data `pgdata` volume me persist hota hai.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: jobflow
+      POSTGRES_PASSWORD: jobflow
+      POSTGRES_DB: jobflow
+    ports:
+    - "5432:5432"
+    volumes:
+    - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
