@@ -15,9 +15,14 @@ starting point.
 - [x] `TestSubmitWorkflow` — integration test, passing
 - [x] Connected to GitHub repo and pushed
 
+## In progress (branch: `feature/poll-task`, not yet merged to `main`)
+
+- [x] `PollTask` RPC — worker pulls a task from the queue (`FOR UPDATE SKIP LOCKED`)
+- [x] `TestPollTask` — integration test, passing (verifies claim + no double-claim)
+- [ ] Merge `feature/poll-task` into `main`
+
 ## Up next (not started yet, pick one at a time)
 
-- [ ] `PollTask` RPC — worker pulls a task from the queue (`FOR UPDATE SKIP LOCKED`)
 - [ ] `ReportResult` RPC — worker reports the task result back
 - [ ] Start the actual gRPC server (real listener in `main.go`)
 - [ ] Worker service (`cmd/worker/main.go`) — poll loop + `sleep`/`http` executors

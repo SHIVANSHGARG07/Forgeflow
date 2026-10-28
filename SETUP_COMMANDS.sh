@@ -160,3 +160,16 @@ docker exec -it $(docker ps --filter "name=postgres" -q) psql -U jobflow -d jobf
 # SELECT name, status FROM tasks WHERE run_id = (SELECT id FROM workflow_runs WHERE workflow_id = '<workflow_id>');
 #
 # Expected: task-A -> READY, task-B -> PENDING (kyunki task-B, task-A pe depend karta hai)
+
+
+# ---------------------------------------------------------------------------
+# STEP 16 (CHECK): PollTask ka test chalana
+# Kya karta hai: internal/scheduler/server_test.go me likha TestPollTask
+# function run karta hai - pehle SubmitWorkflow se ek task banata hai (READY
+# status me), phir PollTask() ko 2 baar call karke verify karta hai:
+#   1st call  => READY task mil jaana chahiye (HasTask = true)
+#   2nd call  => wahi task dobara nahi milna chahiye (HasTask = false),
+#                kyunki pehli call ke baad uska status RUNNING ho chuka hoga
+#                (FOR UPDATE SKIP LOCKED + UPDATE ka concurrency-safety check)
+# ---------------------------------------------------------------------------
+DATABASE_URL="postgres://jobflow:jobflow@localhost:5432/jobflow?sslmode=disable" go test ./internal/scheduler/... -run TestPollTask -v

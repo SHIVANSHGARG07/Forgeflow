@@ -84,3 +84,42 @@ func (s *Server) SubmitWorkflow(ctx context.Context, req *schedulerv1.SubmitWork
 
 	return &schedulerv1.SubmitWorkflowResponse{WorkflowId: workflowID}, nil
 }
+
+
+func (s *Server) PollTask(ctx context.Context, req *schedulerv1.PollTaskRequest) (*schedulerv1.PollTaskResponse, error) {
+
+	row := s.pool.QueryRow(ctx, `
+		UPDATE tasks
+		SET status = 'RUNNING', attempt = attempt + 1, updated_at = now()
+		WHERE id = (
+			SELECT id from tasks 
+			WHERE status = 'READY' AND run_after <= now()
+			ORDER BY run_after
+			LIMIT 1 
+			FOR UPDATE SKIP LOCKED
+		)
+		RETURNING id, type, payload, attempt, idempotency_key
+	`)
+
+	var id, taskType, idempotencyKey string
+	var payload []byte
+	var attempt int32
+
+	err := row.Scan(&id, &taskType, &payload, &attempt, &idempotencyKey)
+
+	if err != nil{
+		return &schedulerv1.PollTaskResponse{HasTask: false}, nil
+	}
+
+	return &schedulerv1.PollTaskResponse{
+		HasTask: true,
+		Task: &schedulerv1.Task{
+			Id: id,
+			Type: taskType,
+			Payload: payload,
+			Attempt: attempt,
+			IdempotencyKey: idempotencyKey,
+		},
+	}, nil
+
+}
