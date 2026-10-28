@@ -57,9 +57,14 @@ func (s *Server) SubmitWorkflow(ctx context.Context, req *schedulerv1.SubmitWork
 		return nil, err
 	}
 
+	// map task to their uuid
+	nameToID := make(map[string]string)
+	
+
 	// tasks
 	for _, t := range req.Tasks {
 		taskID := uuid.New().String()
+		nameToID[t.Name] = taskID
 		status := "READY"
 
 		if len(t.DependsOn) > 0 {
@@ -76,6 +81,20 @@ func (s *Server) SubmitWorkflow(ctx context.Context, req *schedulerv1.SubmitWork
 			return nil, err
 		}
 	}
+
+	// tasks dep
+	for _,t := range req.Tasks {
+			for _, depName := range t.DependsOn{
+				_, err = tx.Exec(ctx,
+				`INSERT INTO task_deps (task_id, depends_on_id) VALUES ($1, $2)`,
+				nameToID[t.Name], nameToID[depName],
+				)
+
+				if err != nil{
+					return nil, err
+				}
+			}
+		}
 
 	// commit both Exec
 	if err := tx.Commit(ctx); err != nil {
@@ -122,4 +141,94 @@ func (s *Server) PollTask(ctx context.Context, req *schedulerv1.PollTaskRequest)
 		},
 	}, nil
 
+}
+
+
+func (s *Server) ReportResult(ctx context.Context, req *schedulerv1.ReportResultRequest) (*schedulerv1.ReportResultResponse, error) {
+
+	tx, err := s.pool.Begin(ctx)
+
+	if err != nil{
+		return nil, err
+	}
+
+	defer tx.Rollback(ctx)
+
+	if req.Success {
+		// Case 1: task succeeded
+		// - mark this task DONE (with fencing check: WHERE id = ? AND attempt = ?)
+		// - find dependent tasks that were PENDING on this task, move them to READY
+		//   (only the ones whose ALL dependencies are now DONE)
+
+		tag, err := tx.Exec(ctx,
+		`UPDATE tasks SET STATUS = 'DONE' , updated_at = now() WHERE id = $1 AND attempt = $2`,
+		req.TaskId, req.Attempt,
+		)
+
+		if err != nil{
+			return nil, err
+		}
+
+		if tag.RowsAffected() == 0{
+			return &schedulerv1.ReportResultResponse{Accepted:  false}, nil
+		}
+
+		_, err = tx.Exec(ctx,
+			`UPDATE tasks t
+			SET STATUS = 'READY', run_after = now()
+			WHERE t.status = 'PENDING'
+			AND t.id in (SELECT task_id FROM task_deps WHERE depends_on_id = $1)
+			AND NOT EXISTS (
+			SELECT 1 FROM task_deps d JOIN tasks u ON u.id = d.depends_on_id
+			WHERE d.task_id = t.id AND u.status <> 'DONE'
+		)
+			`, req.TaskId)
+
+		if err != nil{
+			return nil, err
+		}
+
+
+	} else {
+		// Case 2: task failed
+		// - if attempt < max_attempts -> set back to READY (retry)
+		// - else -> set to FAILED (permanently)
+
+		var attempt, maxAttempts int
+		err := tx.QueryRow(ctx,
+			`SELECT attempt, max_attempts FROM tasks WHERE id = $1`,
+			req.TaskId,
+		).Scan(&attempt, &maxAttempts)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if attempt < maxAttempts {
+			// retry
+			_, err = tx.Exec(ctx,
+				`UPDATE tasks SET status = 'READY' , last_error = $2, updated_at = now()
+				WHERE id = $1 AND attempt = $3
+				`,
+				req.TaskId, req.Error, req.Attempt,
+			)
+		} else {
+			// mark fail
+			_, err = tx.Exec(ctx,
+				`UPDATE tasks SET status = 'FAILED' , last_error = $2, updated_at = now()
+				WHERE id = $1 AND attempt = $3
+				`,
+				req.TaskId, req.Error, req.Attempt,
+			)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return &schedulerv1.ReportResultResponse{Accepted: true}, nil
 }

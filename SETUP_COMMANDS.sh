@@ -173,3 +173,47 @@ docker exec -it $(docker ps --filter "name=postgres" -q) psql -U jobflow -d jobf
 #                (FOR UPDATE SKIP LOCKED + UPDATE ka concurrency-safety check)
 # ---------------------------------------------------------------------------
 DATABASE_URL="postgres://jobflow:jobflow@localhost:5432/jobflow?sslmode=disable" go test ./internal/scheduler/... -run TestPollTask -v
+
+
+# ---------------------------------------------------------------------------
+# STEP 17: Pending migrations apply karna (jab bhi naya migrations/*.up.sql
+# file banaya ho, jaise 000002_task_deps.up.sql)
+# Kya karta hai: schema_migrations table check karta hai ki konsi migrations
+# already apply ho chuki hain, aur sirf baaki pending wali files chalata hai.
+# ---------------------------------------------------------------------------
+migrate -path migrations -database "postgres://jobflow:jobflow@localhost:5432/jobflow?sslmode=disable" up
+
+
+# ---------------------------------------------------------------------------
+# STEP 18 (CHECK): Saari tables ki list dekhna (ek-line command, psql shell
+# ke andar jaaye bina)
+# ---------------------------------------------------------------------------
+docker exec -it jobflow-postgres-1 psql -U jobflow -d jobflow -c "\dt"
+
+
+# ---------------------------------------------------------------------------
+# STEP 19 (CHECK): tasks aur task_deps table ka data dekhna
+# Kya karta hai:
+#  - pehli query: har task ka naam, id, status dikhati hai
+#  - doosri query: task_deps ko tasks ke saath JOIN karke human-readable
+#    dikhati hai "kaunsa task kiske upar depend karta hai" (UUID dekhne ki
+#    zaroorat nahi padti)
+# Expected (after TestSubmitWorkflow run): task-A -> READY, task-B -> PENDING,
+# aur task-B depends_on task-A
+# ---------------------------------------------------------------------------
+docker exec -it jobflow-postgres-1 psql -U jobflow -d jobflow -c "SELECT name, id, status FROM tasks;"
+
+docker exec -it jobflow-postgres-1 psql -U jobflow -d jobflow -c "SELECT t1.name AS task, t2.name AS depends_on FROM task_deps d JOIN tasks t1 ON d.task_id = t1.id JOIN tasks t2 ON d.depends_on_id = t2.id;"
+
+
+# ---------------------------------------------------------------------------
+# STEP 20 (CHECK): ReportResult ka test chalana
+# Kya karta hai: internal/scheduler/server_test.go me likhe TestReportResult
+# aur TestReportResultFailureRetry functions run karta hai.
+#   TestReportResult            => success flow: stale fencing reject,
+#                                  task DONE, dependent task READY (wake-up)
+#   TestReportResultFailureRetry => failure flow: attempt < max_attempts par
+#                                  READY (retry), attempt >= max_attempts
+#                                  par FAILED (permanent)
+# ---------------------------------------------------------------------------
+DATABASE_URL="postgres://jobflow:jobflow@localhost:5432/jobflow?sslmode=disable" go test ./internal/scheduler/... -run TestReportResult -v

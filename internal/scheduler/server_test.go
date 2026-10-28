@@ -110,3 +110,189 @@ func TestPollTask(t *testing.T) {
 		t.Fatal("expected no task available, got HasTask=true")
 	}
 }
+
+func TestReportResult(t *testing.T) {
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		t.Skip("DATABASE_URL not set, skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, connString)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer pool.Close()
+
+	cleanDB(t, ctx, pool)
+
+	server := NewServer(pool)
+
+	_, err = server.SubmitWorkflow(ctx, &schedulerv1.SubmitWorkflowRequest{
+		Name: "report-result-workflow-" + uuid.New().String(),
+		Tasks: []*schedulerv1.TaskSpec{
+			{Name: "task-A", Type: "sleep", Payload: []byte(`{"duration_seconds": 1}`)},
+			{Name: "task-B", Type: "sleep", Payload: []byte(`{"duration_seconds": 1}`), DependsOn: []string{"task-A"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkflow failed: %v", err)
+	}
+
+	// task-A hi READY hai (task-B abhi PENDING hai), isliye PollTask se task-A milega
+	pollResp, err := server.PollTask(ctx, &schedulerv1.PollTaskRequest{WorkerId: "test-worker"})
+	if err != nil {
+		t.Fatalf("PollTask failed: %v", err)
+	}
+	if !pollResp.HasTask {
+		t.Fatal("expected a task to be claimed, got HasTask=false")
+	}
+
+	taskAID := pollResp.Task.Id
+	taskAAttempt := pollResp.Task.Attempt
+
+	// stale/zombie result: galat attempt number se report karo, reject hona chahiye
+	staleResp, err := server.ReportResult(ctx, &schedulerv1.ReportResultRequest{
+		TaskId:  taskAID,
+		Attempt: taskAAttempt + 1, // DB me jo attempt hai usse alag
+		Success: true,
+	})
+	if err != nil {
+		t.Fatalf("ReportResult (stale) failed: %v", err)
+	}
+	if staleResp.Accepted {
+		t.Fatal("expected stale ReportResult to be rejected, got Accepted=true")
+	}
+
+	// ab sahi attempt se success report karo
+	okResp, err := server.ReportResult(ctx, &schedulerv1.ReportResultRequest{
+		TaskId:  taskAID,
+		Attempt: taskAAttempt,
+		Success: true,
+	})
+	if err != nil {
+		t.Fatalf("ReportResult failed: %v", err)
+	}
+	if !okResp.Accepted {
+		t.Fatal("expected ReportResult to be accepted, got Accepted=false")
+	}
+
+	// task-A ab DONE hona chahiye
+	var statusA string
+	err = pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1`, taskAID).Scan(&statusA)
+	if err != nil {
+		t.Fatalf("failed to fetch task-A status: %v", err)
+	}
+	if statusA != "DONE" {
+		t.Fatalf("expected task-A status DONE, got %s", statusA)
+	}
+
+	// task-B ab READY hona chahiye (uski ek hi dependency thi, wo DONE ho chuki)
+	var statusB string
+	err = pool.QueryRow(ctx, `SELECT status FROM tasks WHERE name = 'task-B'`).Scan(&statusB)
+	if err != nil {
+		t.Fatalf("failed to fetch task-B status: %v", err)
+	}
+	if statusB != "READY" {
+		t.Fatalf("expected task-B status READY, got %s", statusB)
+	}
+}
+
+func TestReportResultFailureRetry(t *testing.T) {
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		t.Skip("DATABASE_URL not set, skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, connString)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer pool.Close()
+
+	cleanDB(t, ctx, pool)
+
+	server := NewServer(pool)
+
+	_, err = server.SubmitWorkflow(ctx, &schedulerv1.SubmitWorkflowRequest{
+		Name: "report-result-retry-workflow-" + uuid.New().String(),
+		Tasks: []*schedulerv1.TaskSpec{
+			{Name: "task-A", Type: "sleep", Payload: []byte(`{"duration_seconds": 1}`)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkflow failed: %v", err)
+	}
+
+	pollResp, err := server.PollTask(ctx, &schedulerv1.PollTaskRequest{WorkerId: "test-worker"})
+	if err != nil {
+		t.Fatalf("PollTask failed: %v", err)
+	}
+	if !pollResp.HasTask {
+		t.Fatal("expected a task to be claimed, got HasTask=false")
+	}
+
+	taskID := pollResp.Task.Id
+	attempt := pollResp.Task.Attempt
+
+	// default max_attempts = 3, aur abhi attempt 0 hai, isliye retry (READY) hona chahiye
+	failResp, err := server.ReportResult(ctx, &schedulerv1.ReportResultRequest{
+		TaskId:  taskID,
+		Attempt: attempt,
+		Success: false,
+		Error:   "boom",
+	})
+	if err != nil {
+		t.Fatalf("ReportResult (failure) failed: %v", err)
+	}
+	if !failResp.Accepted {
+		t.Fatal("expected failure ReportResult to be accepted, got Accepted=false")
+	}
+
+	var status, lastError string
+	err = pool.QueryRow(ctx, `SELECT status, last_error FROM tasks WHERE id = $1`, taskID).Scan(&status, &lastError)
+	if err != nil {
+		t.Fatalf("failed to fetch task status: %v", err)
+	}
+	if status != "READY" {
+		t.Fatalf("expected task status READY (retry), got %s", status)
+	}
+	if lastError != "boom" {
+		t.Fatalf("expected last_error 'boom', got %s", lastError)
+	}
+
+	// max_attempts tak attempt force karo, taaki agli failure permanently FAILED ho
+	_, err = pool.Exec(ctx, `UPDATE tasks SET attempt = max_attempts WHERE id = $1`, taskID)
+	if err != nil {
+		t.Fatalf("failed to force attempt to max: %v", err)
+	}
+
+	var forcedAttempt int32
+	err = pool.QueryRow(ctx, `SELECT attempt FROM tasks WHERE id = $1`, taskID).Scan(&forcedAttempt)
+	if err != nil {
+		t.Fatalf("failed to fetch forced attempt: %v", err)
+	}
+
+	finalFailResp, err := server.ReportResult(ctx, &schedulerv1.ReportResultRequest{
+		TaskId:  taskID,
+		Attempt: forcedAttempt,
+		Success: false,
+		Error:   "boom again",
+	})
+	if err != nil {
+		t.Fatalf("ReportResult (final failure) failed: %v", err)
+	}
+	if !finalFailResp.Accepted {
+		t.Fatal("expected final failure ReportResult to be accepted, got Accepted=false")
+	}
+
+	var finalStatus string
+	err = pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1`, taskID).Scan(&finalStatus)
+	if err != nil {
+		t.Fatalf("failed to fetch final task status: %v", err)
+	}
+	if finalStatus != "FAILED" {
+		t.Fatalf("expected task status FAILED, got %s", finalStatus)
+	}
+}

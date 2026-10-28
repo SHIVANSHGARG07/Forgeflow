@@ -19,9 +19,14 @@ starting point.
 - [x] `TestPollTask` — integration test, passing (verifies claim + no double-claim)
 - [x] `feature/poll-task` merged into `main`
 
+- [x] `task_deps` table (migration `000002_task_deps.up.sql`) + `SubmitWorkflow` populates it
+- [x] `ReportResult` RPC — fencing-token check, task DONE + dependent wake-up (success),
+      retry (`READY`) or permanent `FAILED` based on `max_attempts` (failure)
+- [x] `TestReportResult`, `TestReportResultFailureRetry` — integration tests, passing
+
 ## Up next (not started yet, pick one at a time)
 
-- [ ] `ReportResult` RPC — worker reports the task result back
+- [ ] Exponential backoff on retry (`run_after` should move into the future, not now())
 - [ ] Start the actual gRPC server (real listener in `main.go`)
 - [ ] Worker service (`cmd/worker/main.go`) — poll loop + `sleep`/`http` executors
 - [ ] Lease / heartbeat / fencing token (Phase 2)
