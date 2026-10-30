@@ -33,9 +33,12 @@ starting point.
 
 ## Up next (not started yet, pick one at a time)
 
-- [ ] Exponential backoff on retry (`run_after` should move into the future, not now())
 - [ ] Real `sleep`/`http` task executors in the worker (abhi sirf simulated `time.Sleep`)
 - [ ] Lease / heartbeat / fencing token (Phase 2)
+
+### Low priority (not needed right now)
+
+- [ ] Exponential backoff on retry (`run_after` should move into the future, not now())
 
 ## Branch naming convention
 
