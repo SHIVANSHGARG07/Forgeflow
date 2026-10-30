@@ -24,11 +24,17 @@ starting point.
       retry (`READY`) or permanent `FAILED` based on `max_attempts` (failure)
 - [x] `TestReportResult`, `TestReportResultFailureRetry` — integration tests, passing
 
+- [x] Real gRPC server listener (`cmd/scheduler/main.go`) — `net.Listen(":50051")` + `grpc.NewServer()`
+- [x] Worker service (`cmd/worker/main.go`) — gRPC client, infinite poll loop with
+      backoff on empty/error, simulated task execution (`time.Sleep`), `ReportResult`
+      reporting. Verified end-to-end live: worker claims task, reports success,
+      scheduler marks it DONE and wakes up the dependent task (DAG resolution
+      confirmed outside of tests too).
+
 ## Up next (not started yet, pick one at a time)
 
 - [ ] Exponential backoff on retry (`run_after` should move into the future, not now())
-- [ ] Start the actual gRPC server (real listener in `main.go`)
-- [ ] Worker service (`cmd/worker/main.go`) — poll loop + `sleep`/`http` executors
+- [ ] Real `sleep`/`http` task executors in the worker (abhi sirf simulated `time.Sleep`)
 - [ ] Lease / heartbeat / fencing token (Phase 2)
 
 ## Branch naming convention
