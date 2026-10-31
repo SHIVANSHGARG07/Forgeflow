@@ -217,3 +217,27 @@ docker exec -it jobflow-postgres-1 psql -U jobflow -d jobflow -c "SELECT t1.name
 #                                  par FAILED (permanent)
 # ---------------------------------------------------------------------------
 DATABASE_URL="postgres://jobflow:jobflow@localhost:5432/jobflow?sslmode=disable" go test ./internal/scheduler/... -run TestReportResult -v
+
+
+# ---------------------------------------------------------------------------
+# STEP 21: .env file se DATABASE_URL load karna (har baar DATABASE_URL="..."
+# likhne se bachne ke liye)
+# Kya karta hai: .env file me ek line hai (DATABASE_URL=postgres://...),
+# ye command usko padh ke current shell session me env variable set kar deti hai.
+# Isके baad DATABASE_URL="..." prefix likhe bina seedha commands chala sakte ho,
+# jaise: go test ./internal/scheduler/... -run TestWorkerExecutorHTTP -v
+# Note: ye sirf isi terminal session ke liye kaam karega, naya terminal khola
+# to dobara chalana padega.
+# ---------------------------------------------------------------------------
+export $(cat .env | xargs)
+
+
+# ---------------------------------------------------------------------------
+# STEP 22 (CHECK): http executor ka test chalana
+# Kya karta hai: internal/scheduler/server_test.go me likha
+# TestWorkerExecutorHTTP function run karta hai - ek local fake HTTP server
+# banata hai, "http" type task submit karta hai, PollTask se uthata hai,
+# executors.RunHTTP() se actually HTTP request bhejta hai, aur ReportResult
+# ke baad task status DONE verify karta hai.
+# ---------------------------------------------------------------------------
+go test ./internal/scheduler/... -run TestWorkerExecutorHTTP -v -count=1

@@ -1,31 +1,30 @@
-
-
-    // Step 1: Scheduler se gRPC connection banao
-    // Step 2: ek client banao (jisse PollTask/ReportResult call kar sako)
-    // Step 3: infinite loop:
-    //    - PollTask call karo
-    //    - agar task mila -> "kaam karo" (sleep type ke liye time.Sleep)
-    //    - ReportResult call karo (success/failure)
-    //    - agar task nahi mila -> thoda wait karke dobara try karo
+// Step 1: Scheduler se gRPC connection banao
+// Step 2: ek client banao (jisse PollTask/ReportResult call kar sako)
+// Step 3: infinite loop:
+//    - PollTask call karo
+//    - agar task mila -> "kaam karo" (sleep type ke liye time.Sleep)
+//    - ReportResult call karo (success/failure)
+//    - agar task nahi mila -> thoda wait karke dobara try karo
 
 package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"jobflow/internal/worker/executors"
 	schedulerv1 "jobflow/proto/scheduler/v1"
 )
 
-
-func main(){
+func main() {
 
 	worker_client_conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
 
-	if err != nil{
+	if err != nil {
 		log.Fatalf("failed to connect to scheduler: %v", err)
 	}
 
@@ -33,8 +32,7 @@ func main(){
 
 	log.Println("connected to scheduler at localhost: 50051")
 
-
-	// worker starts working with scheduler 
+	// worker starts working with scheduler
 	client := schedulerv1.NewSchedulerServiceClient(worker_client_conn)
 
 	ctx := context.Background()
@@ -56,16 +54,33 @@ func main(){
 
 		log.Printf("got task: %s", resp.Task.Id)
 
+		var taskErr error
 
 		// start actual working
-		time.Sleep(2 * time.Second)
-		log.Printf("task %s done, reporting result", resp.Task.Id)
+		switch resp.Task.Type {
+		case "http":
+			taskErr = executors.RunHTTP(resp.Task.Payload, resp.Task.IdempotencyKey)
+		default:
+			taskErr = fmt.Errorf("unknown task type: %s", resp.Task.Type)
+		}
+
+		if taskErr != nil {
+			log.Printf("task %s failed: %v", resp.Task.Id, taskErr)
+		} else {
+			log.Printf("task %s done, reporting result", resp.Task.Id)
+		}
+
+		errMsg := ""
+		if taskErr != nil {
+			errMsg = taskErr.Error()
+		}
 
 		_, err = client.ReportResult(ctx, &schedulerv1.ReportResultRequest{
 			WorkerId: "worker-1",
 			TaskId:   resp.Task.Id,
 			Attempt:  resp.Task.Attempt,
-			Success:  true,
+			Success:  taskErr == nil,
+			Error:    errMsg,
 		})
 		if err != nil {
 			log.Printf("ReportResult failed: %v", err)

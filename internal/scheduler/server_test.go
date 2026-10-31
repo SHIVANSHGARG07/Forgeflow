@@ -2,12 +2,15 @@ package scheduler
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"jobflow/internal/db"
+	"jobflow/internal/worker/executors"
 	schedulerv1 "jobflow/proto/scheduler/v1"
 )
 
@@ -294,5 +297,83 @@ func TestReportResultFailureRetry(t *testing.T) {
 	}
 	if finalStatus != "FAILED" {
 		t.Fatalf("expected task status FAILED, got %s", finalStatus)
+	}
+}
+
+// TestWorkerExecutorHTTP: end-to-end check ki "http" type task scheduler se
+// mil ke executors.RunHTTP se actually chal sake, aur ReportResult ke baad
+// status DONE ho jaaye.
+func TestWorkerExecutorHTTP(t *testing.T) {
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		t.Skip("DATABASE_URL not set, skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, connString)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer pool.Close()
+
+	cleanDB(t, ctx, pool)
+
+	// Ek local fake HTTP server, taaki test internet pe depend na kare.
+	fakeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer fakeServer.Close()
+
+	server := NewServer(pool)
+
+	payload := []byte(`{"method":"GET","url":"` + fakeServer.URL + `"}`)
+
+	_, err = server.SubmitWorkflow(ctx, &schedulerv1.SubmitWorkflowRequest{
+		Name: "http-executor-workflow-" + uuid.New().String(),
+		Tasks: []*schedulerv1.TaskSpec{
+			{Name: "task-A", Type: "http", Payload: payload},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkflow failed: %v", err)
+	}
+
+	pollResp, err := server.PollTask(ctx, &schedulerv1.PollTaskRequest{WorkerId: "test-worker"})
+	if err != nil {
+		t.Fatalf("PollTask failed: %v", err)
+	}
+	if !pollResp.HasTask {
+		t.Fatal("expected a task to be claimed, got HasTask=false")
+	}
+	if pollResp.Task.Type != "http" {
+		t.Fatalf("expected task type 'http', got %s", pollResp.Task.Type)
+	}
+
+	// Yahi wo cheez hai jo worker/main.go bhi karta hai: task mila, ab
+	// uske type ke hisaab se sahi executor call karo.
+	taskErr := executors.RunHTTP(pollResp.Task.Payload, pollResp.Task.IdempotencyKey)
+	if taskErr != nil {
+		t.Fatalf("RunHTTP failed: %v", taskErr)
+	}
+
+	okResp, err := server.ReportResult(ctx, &schedulerv1.ReportResultRequest{
+		TaskId:  pollResp.Task.Id,
+		Attempt: pollResp.Task.Attempt,
+		Success: true,
+	})
+	if err != nil {
+		t.Fatalf("ReportResult failed: %v", err)
+	}
+	if !okResp.Accepted {
+		t.Fatal("expected ReportResult to be accepted, got Accepted=false")
+	}
+
+	var status string
+	err = pool.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1`, pollResp.Task.Id).Scan(&status)
+	if err != nil {
+		t.Fatalf("failed to fetch task status: %v", err)
+	}
+	if status != "DONE" {
+		t.Fatalf("expected task status DONE, got %s", status)
 	}
 }

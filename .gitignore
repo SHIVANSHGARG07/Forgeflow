@@ -1,0 +1,8 @@
+# Compiled binaries (go build ./cmd/... output) — in folder jaise naam
+# wali files hamesha ignore karo, kyunki ye machine-specific hoti hain
+# aur source code se khud regenerate ho sakti hain.
+/worker
+/scheduler
+
+# .env me local secrets/connection strings hote hain, commit nahi karne.
+.env
