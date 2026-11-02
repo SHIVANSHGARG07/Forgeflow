@@ -60,6 +60,8 @@ func main() {
 		switch resp.Task.Type {
 		case "http":
 			taskErr = executors.RunHTTP(resp.Task.Payload, resp.Task.IdempotencyKey)
+		case "shell":
+			taskErr = executors.RunShell(resp.Task.Payload)
 		default:
 			taskErr = fmt.Errorf("unknown task type: %s", resp.Task.Type)
 		}

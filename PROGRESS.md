@@ -31,9 +31,19 @@ starting point.
       scheduler marks it DONE and wakes up the dependent task (DAG resolution
       confirmed outside of tests too).
 
+- [x] `http` executor (`internal/worker/executors/http.go`) — real HTTP request (method,
+      url, body, idempotency-key header), wired into worker poll loop (`case "http":`)
+- [x] `TestWorkerExecutorHTTP` — integration test, passing
+- [x] `feature/worker-executors-http` merged into `main`
+
+- [x] `shell` executor (`internal/worker/executors/shell.go`) — runs `sh -c <command>`
+      via `os/exec`, wired into worker poll loop (`case "shell":`)
+- [x] `shell_test.go` — unit tests (`TestRunShell_Success`, `_CommandFails`,
+      `_MissingCommand`, `_InvalidJSON`), all passing
+
 ## Up next (not started yet, pick one at a time)
 
-- [ ] Real `sleep`/`http` task executors in the worker (abhi sirf simulated `time.Sleep`)
+- [ ] `sql` task executor in the worker (design doc already covers it)
 - [ ] Lease / heartbeat / fencing token (Phase 2)
 
 ### Low priority (not needed right now)
