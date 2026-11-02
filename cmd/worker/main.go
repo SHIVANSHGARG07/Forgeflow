@@ -11,7 +11,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"jobflow/internal/db"
 	"log"
+	"os"
 	"time"
 
 	"google.golang.org/grpc"
@@ -36,6 +38,17 @@ func main() {
 	client := schedulerv1.NewSchedulerServiceClient(worker_client_conn)
 
 	ctx := context.Background()
+
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		log.Fatal("DATABASE_URL environment variable is not set")
+	}
+
+	pool, err := db.NewPool(ctx, connString)
+	if err != nil {
+		log.Fatalf("failed to connect to database: %v", err)
+	}
+	defer pool.Close()
 
 	// call PollTask from worker to scheduler, bar bar (infinite loop)
 	for {
@@ -62,6 +75,8 @@ func main() {
 			taskErr = executors.RunHTTP(resp.Task.Payload, resp.Task.IdempotencyKey)
 		case "shell":
 			taskErr = executors.RunShell(resp.Task.Payload)
+		case "sql":
+			taskErr = executors.RunSQL(ctx, resp.Task.Payload, pool)
 		default:
 			taskErr = fmt.Errorf("unknown task type: %s", resp.Task.Type)
 		}

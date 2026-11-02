@@ -41,9 +41,14 @@ starting point.
 - [x] `shell_test.go` — unit tests (`TestRunShell_Success`, `_CommandFails`,
       `_MissingCommand`, `_InvalidJSON`), all passing
 
+- [x] `sql` executor (`internal/worker/executors/sql.go`) — runs query via
+      `pgxpool.Pool.Exec`, worker `main.go` now opens its own DB pool
+      (`DATABASE_URL`), wired into worker poll loop (`case "sql":`)
+- [x] `sql_test.go` — integration tests (`TestRunSQL_Success`, `_MissingQuery`,
+      `_InvalidQuery`), all passing (needs `DATABASE_URL` set, else skipped)
+
 ## Up next (not started yet, pick one at a time)
 
-- [ ] `sql` task executor in the worker (design doc already covers it)
 - [ ] Lease / heartbeat / fencing token (Phase 2)
 
 ### Low priority (not needed right now)
