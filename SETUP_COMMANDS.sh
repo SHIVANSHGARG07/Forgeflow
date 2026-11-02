@@ -241,3 +241,17 @@ export $(cat .env | xargs)
 # ke baad task status DONE verify karta hai.
 # ---------------------------------------------------------------------------
 go test ./internal/scheduler/... -run TestWorkerExecutorHTTP -v -count=1
+
+
+# ---------------------------------------------------------------------------
+# STEP 23: Naya migration apply karna (000003_task_lease — tasks table me
+# lease_owner, lease_expires_at columns add karta hai, Phase 2 ke liye)
+# ---------------------------------------------------------------------------
+migrate -path migrations -database "postgres://jobflow:jobflow@localhost:5432/jobflow?sslmode=disable" up
+
+
+# ---------------------------------------------------------------------------
+# STEP 24 (CHECK): tasks table ka structure dekh ke verify karna ki
+# lease_owner aur lease_expires_at columns aa gaye
+# ---------------------------------------------------------------------------
+docker exec -it jobflow-postgres-1 psql -U jobflow -d jobflow -c "\d tasks"

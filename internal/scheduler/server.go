@@ -109,7 +109,11 @@ func (s *Server) PollTask(ctx context.Context, req *schedulerv1.PollTaskRequest)
 
 	row := s.pool.QueryRow(ctx, `
 		UPDATE tasks
-		SET status = 'RUNNING', attempt = attempt + 1, updated_at = now()
+		SET status = 'RUNNING', 
+			lease_owner = $1,
+			lease_expires_at = now() + interval '30 seconds',
+			attempt = attempt + 1,
+			updated_at = now()
 		WHERE id = (
 			SELECT id from tasks 
 			WHERE status = 'READY' AND run_after <= now()
@@ -118,7 +122,7 @@ func (s *Server) PollTask(ctx context.Context, req *schedulerv1.PollTaskRequest)
 			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, type, payload, attempt, idempotency_key
-	`)
+	`, req.WorkerId)
 
 	var id, taskType, idempotencyKey string
 	var payload []byte
@@ -138,6 +142,7 @@ func (s *Server) PollTask(ctx context.Context, req *schedulerv1.PollTaskRequest)
 			Payload: payload,
 			Attempt: attempt,
 			IdempotencyKey: idempotencyKey,
+			LeaseTtlSeconds: 30,
 		},
 	}, nil
 

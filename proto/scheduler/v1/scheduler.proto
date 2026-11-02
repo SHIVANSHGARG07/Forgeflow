@@ -58,8 +58,19 @@ message ReportResultResponse {
   bool accepted = 1;
 }
 
+message HeartbeatRequest{
+  string worker_id = 1;
+  string task_id = 2;
+  int32 attempt = 3;
+}
+
+message HeartbeatResponse{
+  bool lease_valid = 1;
+}
+
 service SchedulerService {
   rpc SubmitWorkflow(SubmitWorkflowRequest) returns (SubmitWorkflowResponse);
   rpc PollTask(PollTaskRequest) returns (PollTaskResponse);
   rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+  rpc HeartBeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
