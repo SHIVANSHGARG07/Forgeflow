@@ -40,10 +40,19 @@
    (`SchedulerServiceClient`/`SchedulerServiceServer` interfaces me `HeartBeat` method aa gaya).
    `go build` abhi bhi pass — kyunki `UnimplementedSchedulerServiceServer` default stub deta hai.
 
-### Abhi tak **nahi** kiya (isi RPC ka baaki hissa)
+### `HeartBeat` RPC — implementation + tests ho gaye
 
-- `server.go` me asli `HeartBeat(...)` **function ka implementation nahi likha** — abhi call aaya to "unimplemented" error dega runtime pe.
-  (Logic jo likhna hai: `lease_expires_at` ko aage badhana + `attempt` match check karke fencing — agar match nahi hua to `lease_valid = false`.)
+- `server.go` me `HeartBeat(...)` likha gaya:
+  ```sql
+  UPDATE tasks
+  SET lease_expires_at = now() + interval '30 seconds'
+  WHERE id = $1 AND lease_owner = $2 AND attempt = $3 AND status = 'RUNNING'
+  ```
+  `tag.RowsAffected() == 1` → `LeaseValid: true`, `0` → `LeaseValid: false` (fencing), query error → `nil, err`.
+- Tests add kiye `server_test.go` me:
+  - `TestHeartBeat` — sahi worker_id + attempt se `LeaseValid=true`
+  - `TestHeartBeatStale` — galat attempt aur galat worker_id dono cases me `LeaseValid=false`
+- Sab 14 tests (poore project ke) pass ho rahe hain (`go test ./... -v`).
 
 ### Phase 2 — baaki kya bacha hai (roadmap se)
 
@@ -52,14 +61,14 @@
 | `tasks` table me lease columns | ✅ Done |
 | `PollTask` lease deta hai | ✅ Done |
 | Proto me `Heartbeat` RPC defined | ✅ Done |
-| `server.go` me `HeartBeat` ka asli logic | ❌ Baaki |
+| `server.go` me `HeartBeat` ka asli logic + tests | ✅ Done |
 | Worker side — background goroutine jo har ~10s `Heartbeat` bheje | ❌ Baaki |
 | Reaper loop (scheduler side, expired leases ko wapas `READY` karna) | ❌ Baaki |
 | Retry backoff with jitter (abhi turant `run_after = now()` hota hai) | ❌ Baaki |
 
 ### Agla step (jahan se continue karna hai)
 
-**`server.go` me `HeartBeat` RPC ka asli implementation likhna** — query jo `attempt` match check kare aur `lease_expires_at` ko `now() + interval '30 seconds'` tak aage badhaye, agar `attempt` match na ho to `lease_valid = false` return kare.
+**Worker side (`cmd/worker/main.go`) me background goroutine likhna** — jab task mile (`PollTask` se), ek goroutine start ho jo har ~10 second (lease TTL ka 1/3) `HeartBeat` RPC call kare jab tak task execute ho raha hai; task complete hone par goroutine ko gracefully stop karna hai.
 
 ### Git state
 

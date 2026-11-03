@@ -26,7 +26,7 @@ func cleanDB(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 }
 
 func TestSubmitWorkflow(t *testing.T) {
-	
+
 	connString := os.Getenv("DATABASE_URL")
 	if connString == "" {
 		t.Skip("DATABASE_URL not set, skipping integration test")
@@ -63,7 +63,6 @@ func TestSubmitWorkflow(t *testing.T) {
 	t.Logf("workflow created with id: %s", resp.WorkflowId)
 }
 
-
 func TestPollTask(t *testing.T) {
 	connString := os.Getenv("DATABASE_URL")
 	if connString == "" {
@@ -83,7 +82,7 @@ func TestPollTask(t *testing.T) {
 
 	submitResp, err := server.SubmitWorkflow(ctx, &schedulerv1.SubmitWorkflowRequest{
 		Name: "poll-test-workflow-" + uuid.New().String(),
-		
+
 		Tasks: []*schedulerv1.TaskSpec{
 			{Name: "task-A", Type: "sleep", Payload: []byte(`{"duration_seconds": 1}`)},
 			{Name: "task-B", Type: "sleep", Payload: []byte(`{"duration_seconds": 1}`), DependsOn: []string{"task-A"}},
@@ -94,14 +93,13 @@ func TestPollTask(t *testing.T) {
 	}
 	_ = submitResp
 
-
 	pollResp, err := server.PollTask(ctx, &schedulerv1.PollTaskRequest{WorkerId: "test-worker"})
 
-	if err != nil{
+	if err != nil {
 		t.Fatalf("PollTask failed: %v", err)
 	}
 
-	if !pollResp.HasTask{
+	if !pollResp.HasTask {
 		t.Fatal("expected a task to be claimed, got HasTask=false")
 	}
 
@@ -375,5 +373,119 @@ func TestWorkerExecutorHTTP(t *testing.T) {
 	}
 	if status != "DONE" {
 		t.Fatalf("expected task status DONE, got %s", status)
+	}
+}
+
+// TestHeartBeat: happy path — sahi worker_id + sahi attempt se Heartbeat
+// bhejne par lease_valid=true aana chahiye.
+func TestHeartBeat(t *testing.T) {
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		t.Skip("DATABASE_URL not set, skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, connString)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer pool.Close()
+
+	cleanDB(t, ctx, pool)
+
+	server := NewServer(pool)
+
+	_, err = server.SubmitWorkflow(ctx, &schedulerv1.SubmitWorkflowRequest{
+		Name: "heartbeat-workflow-" + uuid.New().String(),
+		Tasks: []*schedulerv1.TaskSpec{
+			{Name: "task-A", Type: "sleep", Payload: []byte(`{"duration_seconds": 1}`)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkflow failed: %v", err)
+	}
+
+	pollResp, err := server.PollTask(ctx, &schedulerv1.PollTaskRequest{WorkerId: "test-worker"})
+	if err != nil {
+		t.Fatalf("PollTask failed: %v", err)
+	}
+	if !pollResp.HasTask {
+		t.Fatal("expected a task to be claimed, got HasTask=false")
+	}
+
+	hbResp, err := server.HeartBeat(ctx, &schedulerv1.HeartbeatRequest{
+		WorkerId: "test-worker",
+		TaskId:   pollResp.Task.Id,
+		Attempt:  pollResp.Task.Attempt,
+	})
+	if err != nil {
+		t.Fatalf("HeartBeat failed: %v", err)
+	}
+	if !hbResp.LeaseValid {
+		t.Fatal("expected LeaseValid=true, got false")
+	}
+}
+
+// TestHeartBeatStale: galat attempt ya galat worker_id se Heartbeat bhejne
+// par lease_valid=false aana chahiye (fencing).
+func TestHeartBeatStale(t *testing.T) {
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		t.Skip("DATABASE_URL not set, skipping integration test")
+	}
+
+	ctx := context.Background()
+	pool, err := db.NewPool(ctx, connString)
+	if err != nil {
+		t.Fatalf("failed to connect to db: %v", err)
+	}
+	defer pool.Close()
+
+	cleanDB(t, ctx, pool)
+
+	server := NewServer(pool)
+
+	_, err = server.SubmitWorkflow(ctx, &schedulerv1.SubmitWorkflowRequest{
+		Name: "heartbeat-stale-workflow-" + uuid.New().String(),
+		Tasks: []*schedulerv1.TaskSpec{
+			{Name: "task-A", Type: "sleep", Payload: []byte(`{"duration_seconds": 1}`)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SubmitWorkflow failed: %v", err)
+	}
+
+	pollResp, err := server.PollTask(ctx, &schedulerv1.PollTaskRequest{WorkerId: "test-worker"})
+	if err != nil {
+		t.Fatalf("PollTask failed: %v", err)
+	}
+	if !pollResp.HasTask {
+		t.Fatal("expected a task to be claimed, got HasTask=false")
+	}
+
+	// galat attempt (purana/stale) se heartbeat -> reject
+	staleAttemptResp, err := server.HeartBeat(ctx, &schedulerv1.HeartbeatRequest{
+		WorkerId: "test-worker",
+		TaskId:   pollResp.Task.Id,
+		Attempt:  pollResp.Task.Attempt + 1,
+	})
+	if err != nil {
+		t.Fatalf("HeartBeat (stale attempt) failed: %v", err)
+	}
+	if staleAttemptResp.LeaseValid {
+		t.Fatal("expected LeaseValid=false for stale attempt, got true")
+	}
+
+	// galat worker_id se heartbeat -> reject
+	staleWorkerResp, err := server.HeartBeat(ctx, &schedulerv1.HeartbeatRequest{
+		WorkerId: "someone-else",
+		TaskId:   pollResp.Task.Id,
+		Attempt:  pollResp.Task.Attempt,
+	})
+	if err != nil {
+		t.Fatalf("HeartBeat (stale worker) failed: %v", err)
+	}
+	if staleWorkerResp.LeaseValid {
+		t.Fatal("expected LeaseValid=false for wrong worker_id, got true")
 	}
 }

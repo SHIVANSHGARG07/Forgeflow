@@ -237,3 +237,33 @@ func (s *Server) ReportResult(ctx context.Context, req *schedulerv1.ReportResult
 
 	return &schedulerv1.ReportResultResponse{Accepted: true}, nil
 }
+
+/**
+
+1) Update tasks table set lease_expires
+2) use pool to update 
+3) check rows affected 
+
+
+
+**/
+
+func (s *Server) HeartBeat(ctx context.Context, req *schedulerv1.HeartbeatRequest) (*schedulerv1.HeartbeatResponse, error) {
+
+	tag, err := s.pool.Exec(ctx, `
+	UPDATE tasks
+	SET lease_expires_at = now() + interval '30 seconds'
+	WHERE id = $1 and lease_owner = $2 AND attempt = $3 AND status = 'RUNNING'
+	`, req.TaskId, req.WorkerId, req.Attempt)
+
+	if err != nil{
+		return nil, err
+	}
+
+	if tag.RowsAffected() == 0 {
+		return &schedulerv1.HeartbeatResponse{LeaseValid: false}, nil
+	}
+
+	return &schedulerv1.HeartbeatResponse{LeaseValid: true}, nil
+
+}

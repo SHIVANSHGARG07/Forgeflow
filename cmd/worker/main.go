@@ -67,6 +67,9 @@ func main() {
 
 		log.Printf("got task: %s", resp.Task.Id)
 
+		heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
+		go sendHeartbeats(heartbeatCtx, client, "worker-1", resp.Task.Id, resp.Task.Attempt)
+
 		var taskErr error
 
 		// start actual working
@@ -80,6 +83,9 @@ func main() {
 		default:
 			taskErr = fmt.Errorf("unknown task type: %s", resp.Task.Type)
 		}
+
+		cancelHeartbeat()
+
 
 		if taskErr != nil {
 			log.Printf("task %s failed: %v", resp.Task.Id, taskErr)
@@ -103,4 +109,23 @@ func main() {
 			log.Printf("ReportResult failed: %v", err)
 		}
 	}
+}
+
+
+func sendHeartbeats(ctx context.Context, client schedulerv1.SchedulerServiceClient, workerID, taskID string, attempt int32) {
+    ticker := time.NewTicker(10 * time.Second)
+    defer ticker.Stop()
+
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            client.HeartBeat(ctx, &schedulerv1.HeartbeatRequest{
+                WorkerId: workerID,
+                TaskId:   taskID,
+                Attempt:  attempt,
+            })
+        }
+    }
 }
