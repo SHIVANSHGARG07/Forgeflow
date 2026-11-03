@@ -35,6 +35,8 @@ func main() {
 
 	log.Println("connected to database successfully")
 
+	// background reaper loop: expired leases (crashed workers) ko READY/FAILED karta hai
+	go scheduler.StartReaper(ctx, pool)
 
 	// run actual grpc server for scheduler
 	listener, err := net.Listen("tcp", ":50051")

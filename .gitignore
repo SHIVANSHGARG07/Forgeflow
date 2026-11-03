@@ -6,3 +6,6 @@
 
 # .env me local secrets/connection strings hote hain, commit nahi karne.
 .env
+
+# last_update.md sirf local progress-tracking note hai, repo me commit nahi karna.
+last_update.md
