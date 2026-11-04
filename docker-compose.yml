@@ -1,6 +1,7 @@
-# docker-compose.yml: Local Postgres 16 container chalane ke liye.
-# `docker compose up -d` se start hoga, localhost:5432 pe available hoga
-# (user/pass/db = jobflow/jobflow/jobflow). Data `pgdata` volume me persist hota hai.
+# docker-compose.yml: postgres + scheduler + worker, sab containers me chalte hain.
+# `docker compose up -d --build` se start hoga.
+# Containers aapas me service name se baat karte hain (postgres, scheduler) -
+# localhost nahi, kyunki har container ka apna alag network namespace hota hai.
 
 services:
   postgres:
@@ -13,6 +14,27 @@ services:
     - "5432:5432"
     volumes:
     - pgdata:/var/lib/postgresql/data
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: deploy/docker/scheduler.Dockerfile
+    environment:
+      DATABASE_URL: postgres://jobflow:jobflow@postgres:5432/jobflow?sslmode=disable
+    ports:
+    - "50051:50051"
+    depends_on:
+    - postgres
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: postgres://jobflow:jobflow@postgres:5432/jobflow?sslmode=disable
+      SCHEDULER_ADDR: scheduler:50051
+    depends_on:
+    - scheduler
 
 volumes:
   pgdata:

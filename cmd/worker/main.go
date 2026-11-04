@@ -24,7 +24,12 @@ import (
 
 func main() {
 
-	worker_client_conn, err := grpc.NewClient("localhost:50051", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	schedulerAddr := os.Getenv("SCHEDULER_ADDR")
+	if schedulerAddr == "" {
+		schedulerAddr = "localhost:50051"
+	}
+
+	worker_client_conn, err := grpc.NewClient(schedulerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	if err != nil {
 		log.Fatalf("failed to connect to scheduler: %v", err)
@@ -32,7 +37,7 @@ func main() {
 
 	defer worker_client_conn.Close()
 
-	log.Println("connected to scheduler at localhost: 50051")
+	log.Printf("connected to scheduler at %s", schedulerAddr)
 
 	// worker starts working with scheduler
 	client := schedulerv1.NewSchedulerServiceClient(worker_client_conn)
