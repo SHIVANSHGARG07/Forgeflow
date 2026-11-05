@@ -1,0 +1,29 @@
+# worker-deployment.yaml
+# Worker ka Deployment - Service ki zarurat nahi, kyunki koi bhi Pod worker ko
+# naam se dhoondh ke connect nahi karta (worker khud scheduler ko poll karta
+# hai, ulta nahi). SCHEDULER_ADDR me scheduler Service ka naam use kar rahe hain.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: jobflow-worker:test
+          imagePullPolicy: Never
+          env:
+            - name: DATABASE_URL
+              value: "postgres://jobflow:jobflow@postgres:5432/jobflow?sslmode=disable"
+            - name: SCHEDULER_ADDR
+              value: "scheduler:50051"
+

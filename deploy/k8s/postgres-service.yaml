@@ -1,0 +1,16 @@
+# postgres-service.yaml
+# Postgres Pod ke liye stable network address. Scheduler/worker is Service ke
+# naam ("postgres") se hamesha connect karenge, chahe peeche Pod kabhi bhi
+# crash/restart ho, naya random naam le kar aaye.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+

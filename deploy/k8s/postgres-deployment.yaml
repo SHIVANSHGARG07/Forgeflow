@@ -1,0 +1,31 @@
+# postgres-deployment.yaml
+# Postgres ka Deployment - 1 replica, public image use karta hai (postgres:16).
+# docker-compose.yml wali hi values (POSTGRES_USER/PASSWORD/DB) use kar rahe hain
+# taaki scheduler/worker ka DATABASE_URL same connection string se match ho.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: "jobflow"
+            - name: POSTGRES_PASSWORD
+              value: "jobflow"
+            - name: POSTGRES_DB
+              value: "jobflow"

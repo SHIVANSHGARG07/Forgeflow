@@ -1,0 +1,15 @@
+# scheduler-service.yaml
+# Scheduler Pod ke liye stable network address. Worker is Service ke naam
+# ("scheduler") se connect karega, jaise docker-compose me SCHEDULER_ADDR
+# me "scheduler:50051" use kiya tha.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: scheduler
+spec:
+  selector:
+    app: scheduler
+  ports:
+    - port: 50051
+      targetPort: 50051
